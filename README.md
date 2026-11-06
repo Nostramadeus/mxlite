@@ -33,15 +33,14 @@ MxLite asks the mouse at startup whether it has both. If it does not, MxLite kee
 
 | Mouse family | Works? | Why |
 |---|---|---|
-| MX Anywhere 3, MX Anywhere 3S | **Yes**. The 3S is tested. | Has SmartShift and the button under the wheel. |
-| MX Master, MX Master 2S, MX Master 3, MX Master 3S (incl. "for Mac" versions) | **Expected yes**, not tested yet | Same SmartShift wheel and the same button behind the wheel. |
-| MX Master 4 | **Unknown**, not tested | Newer model. Please open an issue with your `mxlite.log` if you try it. |
+| MX Anywhere 3, MX Anywhere 3S, MX Master, MX Master 2S, MX Master 3, MX Master 3S (incl. "for Mac" versions) | **Expected to work** | Same hardware: SmartShift wheel and the button under/behind the wheel. |
+| MX Master 4 | **Unknown** | Newer model. Please open an issue with your `mxlite.log` if you try it. |
 | MX Anywhere 2, MX Anywhere 2S | No | Free-spin is switched by hand, not SmartShift. |
 | MX Vertical, MX Ergo, Lift, Pebble, M-series (M185, M330, M720...) | No | No SmartShift wheel. |
 | G-series gaming mice | No | Different wheel and software (G HUB). |
 | Any non-Logitech mouse | No | MxLite only speaks Logitech's protocol. |
 
-On the "Yes" and "Expected yes" mice, the two thumb side buttons can also be used (Settings, off by default).
+On the "Expected to work" mice, the two thumb side buttons can also be used (Settings, off by default).
 
 Check yours: open `mxlite.log` next to the exe. A working mouse shows `Gesture button active on <your mouse name>`.
 
@@ -118,6 +117,31 @@ build.cmd
 It writes `MxLite.exe` next to `MxLite.cs`. Start with `MxLite.exe --debug` for a console with live log output.
 
 MxLite talks to the mouse directly over Logitech's HID++ 2.0 protocol (features 0x1B04 reprogrammable controls and 0x2110/0x2111 SmartShift).
+
+## Contributing: support for more mice
+
+Pull requests that bring these features to other mice are welcome. Where to start in `MxLite.cs`:
+
+| Part | What it does |
+|---|---|
+| `FindMouse` | Finds a Logitech HID++ 2.0 device that has feature 0x1B04 (reprogrammable buttons) AND 0x2110/0x2111 (SmartShift). |
+| `ApplyDivert` / `ApplySideDivert` | Tells the mouse to send a button to MxLite instead of Windows. Button IDs: `GESTURE_CID` 0x00C4, `BACK_CID` 0x0053, `FWD_CID` 0x0056. |
+| `HandleEvent` | The gesture logic: click vs. hold+move, multi-desktop jumps, turn-back, side buttons. It only needs "button down/up" and "mouse moved dx, dy", so a new input source can feed it. |
+
+**Logitech mice in the "No" rows (MX Vertical, MX Ergo, Lift, MX Anywhere 2S, G-series...).** Most of them still speak HID++ 2.0 and have feature 0x1B04. Steps:
+1. Make SmartShift optional in `FindMouse` (today a mouse without 0x2110/0x2111 is skipped) and skip `ApplySmartShift` when it is missing.
+2. List the mouse's buttons: 0x1B04 function 0 gives the count, function 1 gives each button's ID and flags. Pick a button whose flags say it can be diverted, and make the ID a setting instead of the fixed `GESTURE_CID`.
+3. Hold+move needs the "raw XY" flag on that button. Without it, read movement from a low-level mouse hook (next paragraph) while the button is held.
+4. G-series: G HUB's onboard profiles can remap buttons too; quit G HUB while testing.
+
+**Non-Logitech mice (any brand).** They do not speak HID++. Use a Windows low-level mouse hook (`SetWindowsHookEx` with `WH_MOUSE_LL`) instead:
+- It sees the middle button, the two side buttons (`XBUTTON1` / `XBUTTON2`) and all movement for any mouse.
+- Swallow the chosen button (return 1 from the hook) and feed press, release and dx/dy into the same gesture logic as `HandleEvent`.
+- Limit: the hook only sees the 5 standard buttons. Extra buttons that only the maker's software knows about need that maker's protocol.
+
+**Testing without a mouse.** `HandleEvent` can be fed fake reports through reflection. Bind harmless keys (F20-F24) in the config so a test run does not switch your real desktops, then read the `Sent:` lines in `mxlite.log`.
+
+**In your pull request**, please name the mouse you tested and paste the `mxlite.log` lines that show it was found.
 
 ## License
 

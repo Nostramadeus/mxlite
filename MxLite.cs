@@ -156,6 +156,7 @@ class Config
     public int ClickMaxMove = 245;
     public bool Repeat = false;
     public int ExtraDistance = 450;      // movement after the first jump needed for each extra desktop
+    public int MultiHoldMs = 400;        // extra jumps (and turn-back) only after the button has been held this long
     public bool SideButtons = false;     // true = thumb buttons send Back/Forward below; false = normal browser back/forward
     public string Back = "Ctrl+Win+Left";
     public string Forward = "Ctrl+Win+Right";
@@ -185,6 +186,7 @@ class Config
                 case "click_max_move": int.TryParse(v, out c.ClickMaxMove); break;
                 case "repeat": c.Repeat = v != "0" && v.ToLowerInvariant() != "false"; break;
                 case "extra_distance": int.TryParse(v, out c.ExtraDistance); break;
+                case "multi_hold_ms": int.TryParse(v, out c.MultiHoldMs); break;
                 case "side_buttons": c.SideButtons = v != "0" && v.ToLowerInvariant() != "false"; break;
                 case "back": c.Back = v; break;
                 case "forward": c.Forward = v; break;
@@ -193,6 +195,7 @@ class Config
         if (c.GestureDistance < 100) c.GestureDistance = 100;
         if (c.ExtraDistance < 100) c.ExtraDistance = 100;
         if (c.ClickMaxMove < 50) c.ClickMaxMove = 50;
+        if (c.MultiHoldMs < 0) c.MultiHoldMs = 0;
         return c;
     }
 
@@ -222,6 +225,9 @@ class Config
         sb.AppendLine("; With repeat = 1: extra movement (in counts) after the first jump for EACH further desktop.");
         sb.AppendLine(";   Example: gesture_distance 300 + extra_distance 450 -> 300 = 1 desktop, 750 = 2, 1200 = 3.");
         sb.AppendLine("extra_distance = " + ExtraDistance);
+        sb.AppendLine("; With repeat = 1: a quick sweep (released sooner than this many milliseconds after the press)");
+        sb.AppendLine(";   moves only 1 desktop. Hold at least this long to jump more. 0 = no wait.");
+        sb.AppendLine("multi_hold_ms = " + MultiHoldMs);
         sb.AppendLine();
         sb.AppendLine("; Thumb side buttons. 1 = they send back/forward below (default: switch desktops).");
         sb.AppendLine(";   0 = leave them alone (normal browser back/forward).");
@@ -705,6 +711,7 @@ class MxLite
     static int gEvt; // rawXY events seen this hold
     static int gJumps; // desktops switched mid-hold this hold
     static int gPeak;  // furthest progress along gDir since the last jump
+    static int gPressTick; // Environment.TickCount at the press
     static bool sideBackDown, sideFwdDown; // thumb buttons currently held (device thread only)
 
     static string DirAction(Config c, int dir)
@@ -743,6 +750,7 @@ class MxLite
                 if (gHeld) Log("press while already held - missed a release, resetting state");
                 gHeld = true; gFired = false; gGestureDone = false;
                 gAccX = 0; gAccY = 0; gTotalMove = 0; gDir = 0; gEvt = 0; gJumps = 0; gPeak = 0;
+                gPressTick = Environment.TickCount;
             }
             else if (!pressed && gHeld)
             {
@@ -801,6 +809,11 @@ class MxLite
                 if (gDir != 0 && string.IsNullOrEmpty(DirAction(c, gDir))) gDir = 0;
             }
             if (gGestureDone || gDir == 0) return;
+            // quick sweep: after the first jump, movement before multi_hold_ms is thrown
+            // away, so a fast flick moves one desktop and nothing piles up to fire the
+            // moment the wait ends
+            if (gJumps > 0 && Environment.TickCount - gPressTick < c.MultiHoldMs)
+            { gAccX = 0; gAccY = 0; gPeak = 0; return; }
             // progress = movement along the latched direction since the last jump
             int progress = gDir == 1 ? gAccX : gDir == -1 ? -gAccX : gDir == 2 ? gAccY : -gAccY;
             if (progress > gPeak) gPeak = progress;
@@ -1285,6 +1298,7 @@ class SettingsForm : Form
         c.ClickMaxMove = Math.Max(150, Math.Min(400, tbDist.Value * 7 / 10));
         c.Repeat = cbRepeat.Checked;
         c.ExtraDistance = tbExtra.Value;
+        c.MultiHoldMs = MxLite.Cfg.MultiHoldMs; // ini-only setting: keep the hand-edited value
         c.SideButtons = cbSide.Checked;
         c.Back = GetCombo(5); c.Forward = GetCombo(6);
         c.SmartShift = rbAuto.Checked ? "auto" : tbShift.Value.ToString();

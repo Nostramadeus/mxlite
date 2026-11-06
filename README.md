@@ -16,6 +16,7 @@ Not made by or affiliated with Logitech.
   - Click: Task View (see all open windows).
   - Hold + move the mouse: switch virtual desktops (configurable).
   - Hold + move further: jump 2 or more desktops in one hold (Settings: "Move further to jump 2 or more desktops").
+  - A quick sweep (press, flick, let go) always moves only 1 desktop, however far the mouse travels. Extra desktops need the button held for at least `multi_hold_ms` (default 400 ms).
   - Changed your mind mid-hold? Move back one swipe length and it jumps the other way.
 - **The two thumb side buttons** (optional, off by default)
   - Rear = previous desktop, front = next desktop (configurable).
@@ -65,6 +66,7 @@ Settings live in `mxlite.ini` next to the exe. The Settings window writes it; ed
 | `gesture_distance` | Mouse movement needed for the first desktop (default 300). |
 | `repeat` | `1` = keep moving to jump several desktops in one hold. `0` = one per hold. |
 | `extra_distance` | With `repeat = 1`: extra movement for each further desktop (default 450). 300 + 450: 300 = 1 desktop, 750 = 2, 1200 = 3. |
+| `multi_hold_ms` | With `repeat = 1`: milliseconds after the press before a 2nd desktop (or a turn-back) can happen (default 400). Movement before that is ignored, so a quick sweep moves 1 desktop. `0` = no wait. Only in the ini file, not in the Settings window. |
 | `side_buttons` | `1` = thumb buttons send `back` / `forward` below. `0` = normal browser back/forward. |
 | `back`, `forward` | Keys for the rear and front thumb buttons (default `Ctrl+Win+Left` / `Ctrl+Win+Right`). |
 | `smartshift` | `auto` = leave the wheel as the mouse has it. `1`-`50` = lower spins free on a gentle flick, higher needs a hard flick. |

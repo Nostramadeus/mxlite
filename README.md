@@ -24,11 +24,26 @@ Not made by or affiliated with Logitech.
 
 ## Which mice work
 
-Any Logitech mouse that has BOTH the auto free-spin wheel (Logitech calls it "SmartShift") and the extra button under the wheel.
+The rule: the mouse needs BOTH of these.
 
-| Works | Does not work |
-|---|---|
-| MX Master, MX Master 2S, MX Master 3, MX Master 3S, MX Anywhere 3, MX Anywhere 3S | Non-Logitech mice; simpler Logitech models without the auto free-spin wheel (M185, M330, M720, G gaming mice). MxLite will not find them. |
+1. A scroll wheel that switches by itself from click-click to free-spin when you flick it hard. Logitech calls this "SmartShift".
+2. A small button just below or behind the scroll wheel.
+
+MxLite asks the mouse at startup whether it has both. If it does not, MxLite keeps searching and the tray tooltip says "searching for mouse...". Nothing breaks.
+
+| Mouse family | Works? | Why |
+|---|---|---|
+| MX Anywhere 3, MX Anywhere 3S | **Yes**. The 3S is tested. | Has SmartShift and the button under the wheel. |
+| MX Master, MX Master 2S, MX Master 3, MX Master 3S (incl. "for Mac" versions) | **Expected yes**, not tested yet | Same SmartShift wheel and the same button behind the wheel. |
+| MX Master 4 | **Unknown**, not tested | Newer model. Please open an issue with your `mxlite.log` if you try it. |
+| MX Anywhere 2, MX Anywhere 2S | No | Free-spin is switched by hand, not SmartShift. |
+| MX Vertical, MX Ergo, Lift, Pebble, M-series (M185, M330, M720...) | No | No SmartShift wheel. |
+| G-series gaming mice | No | Different wheel and software (G HUB). |
+| Any non-Logitech mouse | No | MxLite only speaks Logitech's protocol. |
+
+On the "Yes" and "Expected yes" mice, the two thumb side buttons can also be used (Settings, off by default).
+
+Check yours: open `mxlite.log` next to the exe. A working mouse shows `Gesture button active on <your mouse name>`.
 
 Works over Bluetooth or the Logi Bolt / Unifying USB receiver. Needs Windows 10 or 11 (64-bit). Nothing else to install.
 

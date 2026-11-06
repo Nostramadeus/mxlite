@@ -974,8 +974,8 @@ class SettingsForm : Form
     Label[] rowLabels = new Label[ROWS];
     Panel card;
     Label statusLabel, hint;
-    TrackBar tbDist, tbShift, tbExtra;
-    Label distValue, extraValue, extraLabel;
+    TrackBar tbDist, tbShift, tbExtra, tbHold;
+    Label distValue, extraValue, extraLabel, holdValue, holdLabel;
     RadioButton rbAuto, rbCustom;
     CheckBox cbRepeat, cbStartup, cbSide;
     Label savedLabel;
@@ -992,7 +992,7 @@ class SettingsForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         BackColor = Color.White;
         Font = new Font("Segoe UI", 9.75f);
-        ClientSize = new Size(500, 954);
+        ClientSize = new Size(500, 1028);
 
         int L = 24, W = 452;
         int y = 16;
@@ -1064,6 +1064,21 @@ class SettingsForm : Form
         Label eh = new Label(); eh.Text = "How much further you move after the first jump for each next desktop.";
         eh.ForeColor = MUTED; eh.Font = new Font("Segoe UI", 8.25f);
         eh.SetBounds(L, y, W, 18); Controls.Add(eh);
+        y += 30;
+        holdLabel = new Label(); holdLabel.Text = "Hold before 2nd jump"; holdLabel.SetBounds(L, y, 138, 26);
+        holdLabel.TextAlign = ContentAlignment.MiddleLeft; Controls.Add(holdLabel);
+        tbHold = new TrackBar();
+        tbHold.Minimum = 0; tbHold.Maximum = 1000; tbHold.TickFrequency = 100; tbHold.SmallChange = 50; tbHold.LargeChange = 100;
+        tbHold.SetBounds(L + 140, y - 2, 226, 40);
+        Controls.Add(tbHold);
+        holdValue = new Label(); holdValue.SetBounds(L + 372, y + 3, 80, 20); holdValue.ForeColor = MUTED;
+        holdValue.TextAlign = ContentAlignment.MiddleRight;
+        Controls.Add(holdValue);
+        tbHold.ValueChanged += delegate { holdValue.Text = tbHold.Value + " ms"; ScheduleApply(); };
+        y += 44;
+        Label hh = new Label(); hh.Text = "A quick sweep moves 1 desktop. Hold at least this long to jump more. 0 = no wait.";
+        hh.ForeColor = MUTED; hh.Font = new Font("Segoe UI", 8.25f);
+        hh.SetBounds(L, y, W, 18); Controls.Add(hh);
         y += 30;
 
         y = Section("SIDE BUTTONS (THUMB)", L, W, y);
@@ -1186,6 +1201,8 @@ class SettingsForm : Form
     {
         tbExtra.Enabled = cbRepeat.Checked;
         extraLabel.Enabled = cbRepeat.Checked;
+        tbHold.Enabled = cbRepeat.Checked;
+        holdLabel.Enabled = cbRepeat.Checked;
         for (int i = 5; i < ROWS; i++)
         {
             combos[i].Enabled = cbSide.Checked; customs[i].Enabled = cbSide.Checked;
@@ -1265,6 +1282,8 @@ class SettingsForm : Form
         cbRepeat.Checked = c.Repeat;
         tbExtra.Value = Math.Min(tbExtra.Maximum, Math.Max(tbExtra.Minimum, c.ExtraDistance));
         extraValue.Text = ShortLabel(tbExtra.Value);
+        tbHold.Value = Math.Min(tbHold.Maximum, Math.Max(tbHold.Minimum, c.MultiHoldMs));
+        holdValue.Text = tbHold.Value + " ms";
         cbSide.Checked = c.SideButtons;
         SetCombo(5, c.Back); SetCombo(6, c.Forward);
         UpdateEnabled();
@@ -1298,7 +1317,7 @@ class SettingsForm : Form
         c.ClickMaxMove = Math.Max(150, Math.Min(400, tbDist.Value * 7 / 10));
         c.Repeat = cbRepeat.Checked;
         c.ExtraDistance = tbExtra.Value;
-        c.MultiHoldMs = MxLite.Cfg.MultiHoldMs; // ini-only setting: keep the hand-edited value
+        c.MultiHoldMs = tbHold.Value;
         c.SideButtons = cbSide.Checked;
         c.Back = GetCombo(5); c.Forward = GetCombo(6);
         c.SmartShift = rbAuto.Checked ? "auto" : tbShift.Value.ToString();

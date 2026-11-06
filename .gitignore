@@ -1,0 +1,15 @@
+# WHITELIST: nothing is published unless it is listed below on purpose.
+# Local-only files (log, your mxlite.ini, notes, backups, test scripts, exe) stay out.
+*
+!.gitignore
+!LICENSE
+!README.md
+!MxLite.cs
+!build.cmd
+!add-startmenu.cmd
+!install-startup.cmd
+!uninstall-startup.cmd
+!install-elevated.cmd
+!install-elevated.ps1
+!uninstall-elevated.cmd
+!uninstall-elevated.ps1

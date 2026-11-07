@@ -21,6 +21,7 @@ Not made by or affiliated with Logitech.
 - **The two thumb side buttons** (optional, off by default)
   - Rear = previous desktop, front = next desktop (configurable).
   - Or leave them as normal browser back/forward.
+- **Dragging a window?** Hold it with the left button, then switch desktops with a thumb button or the wheel-button swipe. The window comes along. Works for a Chrome tab you are pulling out, too. Settings: "Drag a window along" (on by default). Windows 10 1809 to 22H2 only for now; on Windows 11 the switch happens without the window (Contributing: the interface ids differ per build, see MScholtes/VirtualDesktop).
 - **The scroll wheel's auto free-spin** (ratchety normally, spins free on a hard flick) keeps working. That part lives inside the mouse itself. MxLite can also set how hard a flick it needs.
 
 ## Which mice work
@@ -69,6 +70,7 @@ Settings live in `mxlite.ini` next to the exe. The Settings window writes it; ed
 | `multi_hold_ms` | With `repeat = 1`: milliseconds after the press before a 2nd desktop (or a turn-back) can happen (default 400). Movement before that is ignored, so a quick sweep moves 1 desktop. `0` = no wait. Settings: "Hold before 2nd jump". |
 | `side_buttons` | `1` = thumb buttons send `back` / `forward` below. `0` = normal browser back/forward. |
 | `back`, `forward` | Keys for the rear and front thumb buttons (default `Ctrl+Win+Left` / `Ctrl+Win+Right`). |
+| `drag_follow` | `1` = a window you hold with the left button moves to the new desktop with you (default). `0` = it stays behind. Only for keys that are exactly `Ctrl+Win+Left` / `Ctrl+Win+Right`. Settings: "Drag a window along". |
 | `smartshift` | `auto` = leave the wheel as the mouse has it. `1`-`50` = lower spins free on a gentle flick, higher needs a hard flick. |
 
 Key names: `Ctrl Shift Alt Win A-Z 0-9 F1-F24 Left Right Up Down Tab Space Enter Esc PgUp PgDn Home End PlayPause NextTrack PrevTrack VolUp VolDown Mute BrowserBack BrowserFwd PrtSc`.

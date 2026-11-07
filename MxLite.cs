@@ -83,6 +83,179 @@ static class Native
     }
     [DllImport("user32.dll", SetLastError = true)]
     public static extern uint SendInput(uint n, INPUT[] inputs, int size);
+
+    // drag follow: left button state + the window under the cursor
+    [StructLayout(LayoutKind.Sequential)]
+    public struct POINT { public int X, Y; }
+    [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int vk);
+    [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);
+    [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT p);
+    [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern int GetClassName(IntPtr hwnd, StringBuilder name, int max);
+}
+
+// ---- virtual desktops (undocumented Windows 10 COM, builds 17763-19045) -------
+// Vtable order matters: every slot up to the last one used must be declared.
+
+[ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown), Guid("6D5140C1-7436-11CE-8034-00AA006009FA")]
+interface IServiceProvider10
+{
+    [return: MarshalAs(UnmanagedType.IUnknown)] object QueryService(ref Guid service, ref Guid riid);
+}
+
+[ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown), Guid("92CA9DCD-5622-4BBA-A805-5E9F541BD8C9")]
+interface IObjectArray
+{
+    void GetCount(out int count);
+    void GetAt(int index, ref Guid iid, [MarshalAs(UnmanagedType.Interface)] out object obj);
+}
+
+[ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown), Guid("372E1D3B-38D3-42E4-A15B-8AB2B178F513")]
+interface IApplicationView { }   // only ever passed as a pointer
+
+[ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown), Guid("FF72FFDD-BE7E-43FC-9C03-AD81681E88E4")]
+interface IVirtualDesktop
+{
+    bool IsViewVisible(IApplicationView view);
+    Guid GetId();
+}
+
+[ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown), Guid("F31574D6-B682-4CDC-BD56-1827860ABEC6")]
+interface IVirtualDesktopManagerInternal
+{
+    int GetCount();                                                        // slot 3
+    void MoveViewToDesktop(IApplicationView view, IVirtualDesktop desktop); // 4
+    bool CanViewMoveDesktops(IApplicationView view);                       // 5
+    IVirtualDesktop GetCurrentDesktop();                                   // 6
+    void GetDesktops(out IObjectArray desktops);                           // 7
+    [PreserveSig] int GetAdjacentDesktop(IVirtualDesktop from, int direction, out IVirtualDesktop desktop); // 8; 3 = left, 4 = right
+    void SwitchDesktop(IVirtualDesktop desktop);                           // 9
+    IVirtualDesktop CreateDesktop();                                       // 10
+    void RemoveDesktop(IVirtualDesktop desktop, IVirtualDesktop fallback);  // 11
+    IVirtualDesktop FindDesktop(ref Guid id);                              // 12
+}
+
+[ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown), Guid("1841C6D7-4F9D-42C0-AF41-8747538F10E5")]
+interface IApplicationViewCollection
+{
+    int GetViews(out IObjectArray array);                                  // 3
+    int GetViewsByZOrder(out IObjectArray array);                          // 4
+    int GetViewsByAppUserModelId([MarshalAs(UnmanagedType.LPWStr)] string id, out IObjectArray array); // 5
+    [PreserveSig] int GetViewForHwnd(IntPtr hwnd, out IApplicationView view); // 6
+    // later slots unused
+}
+
+// Moves the window being dragged to the next desktop and switches there, so the
+// drag continues on the new desktop. Runs on the device thread (MTA).
+static class DragFollow
+{
+    static readonly Guid CLSID_ImmersiveShell = new Guid("C2F03A33-21F5-47FA-B4BB-156362A2F239");
+    static readonly Guid SID_VirtualDesktopManagerInternal = new Guid("C5E0CDCA-7B6E-41B2-9FC4-D93975CC467B");
+
+    // created once, dropped after any failure so the next try builds them again
+    // (Explorer restarts kill the old ones)
+    static object shell;
+    internal static IVirtualDesktopManagerInternal Mgr;
+    internal static IApplicationViewCollection Views;
+    static int versionState; // 0 = not checked, 1 = supported, -1 = not supported (logged once)
+
+    // Moves the top-level window under the cursor to the desktop next to the current one
+    // (dir -1 = left, +1 = right) and switches to it. Returns false on any failure (logged).
+    public static bool MoveDraggedWindow(int dir)
+    {
+        string step = "version check";
+        try
+        {
+            if (!WindowsVersionOk()) return false;
+            step = "find window";
+            IntPtr hwnd = DraggedWindow();
+            if (hwnd == IntPtr.Zero) return false;
+            step = "connect to Explorer";
+            EnsureCom();
+            step = "GetViewForHwnd";
+            IApplicationView view;
+            int hr = Views.GetViewForHwnd(hwnd, out view);
+            if (hr != 0) { MxLite.Log("drag follow: no view for the window (hr 0x" + hr.ToString("X8") + ")"); ResetCom(); return false; }
+            step = "GetCurrentDesktop";
+            IVirtualDesktop cur = Mgr.GetCurrentDesktop();
+            step = "GetAdjacentDesktop";
+            IVirtualDesktop target;
+            hr = Mgr.GetAdjacentDesktop(cur, dir < 0 ? 3 : 4, out target);
+            if (hr != 0) { MxLite.Log("drag follow: no desktop that way"); return false; }
+            step = "MoveViewToDesktop";
+            Mgr.MoveViewToDesktop(view, target);
+            step = "SwitchDesktop";
+            Mgr.SwitchDesktop(target);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            MxLite.Log("drag follow: " + step + " failed: " + ex.Message);
+            ResetCom();
+            return false;
+        }
+    }
+
+    // Windows 10 1809 (17763) to 22H2 (19045) only: Windows 11 changed the interface ids.
+    internal static bool WindowsVersionOk()
+    {
+        if (versionState == 0)
+        {
+            Version v = Environment.OSVersion.Version;
+            int major = v.Major, build = v.Build;
+            if (build == 9200)
+            {
+                // exe without an OS manifest: Windows reports 6.2.9200, so ask the registry
+                using (Microsoft.Win32.RegistryKey k = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion"))
+                {
+                    if (k != null)
+                    {
+                        int b;
+                        if (int.TryParse(k.GetValue("CurrentBuildNumber") as string, out b)) build = b;
+                        object m = k.GetValue("CurrentMajorVersionNumber");
+                        if (m is int) major = (int)m;
+                    }
+                }
+            }
+            versionState = major == 10 && build >= 17763 && build <= 19045 ? 1 : -1;
+            if (versionState < 0) MxLite.Log("drag follow needs Windows 10 1809-22H2; this is build " + build);
+        }
+        return versionState > 0;
+    }
+
+    // the top-level window under the cursor (else the foreground window);
+    // zero for the desktop and the taskbar (nothing to move)
+    static IntPtr DraggedWindow()
+    {
+        IntPtr h = IntPtr.Zero;
+        Native.POINT pt;
+        if (Native.GetCursorPos(out pt)) h = Native.GetAncestor(Native.WindowFromPoint(pt), 2); // 2 = GA_ROOT
+        if (h == IntPtr.Zero) h = Native.GetForegroundWindow();
+        if (h == IntPtr.Zero) return IntPtr.Zero;
+        StringBuilder sb = new StringBuilder(256);
+        Native.GetClassName(h, sb, sb.Capacity);
+        string cls = sb.ToString();
+        if (cls == "Progman" || cls == "WorkerW" || cls == "Shell_TrayWnd" || cls == "Shell_SecondaryTrayWnd") return IntPtr.Zero;
+        return h;
+    }
+
+    internal static void EnsureCom()
+    {
+        if (shell != null && Mgr != null && Views != null) return;
+        ResetCom();
+        shell = Activator.CreateInstance(Type.GetTypeFromCLSID(CLSID_ImmersiveShell));
+        IServiceProvider10 sp = (IServiceProvider10)shell;
+        Guid service = SID_VirtualDesktopManagerInternal;
+        Guid riid = typeof(IVirtualDesktopManagerInternal).GUID;
+        Mgr = (IVirtualDesktopManagerInternal)sp.QueryService(ref service, ref riid);
+        service = typeof(IApplicationViewCollection).GUID;
+        riid = service;
+        Views = (IApplicationViewCollection)sp.QueryService(ref service, ref riid);
+    }
+
+    static void ResetCom() { shell = null; Mgr = null; Views = null; }
 }
 
 class HidppDevice : IDisposable
@@ -160,6 +333,7 @@ class Config
     public bool SideButtons = false;     // true = thumb buttons send Back/Forward below; false = normal browser back/forward
     public string Back = "Ctrl+Win+Left";
     public string Forward = "Ctrl+Win+Right";
+    public bool DragFollow = true;       // left button held while switching desktops = the window comes along
 
     public static Config Load(string path)
     {
@@ -190,6 +364,7 @@ class Config
                 case "side_buttons": c.SideButtons = v != "0" && v.ToLowerInvariant() != "false"; break;
                 case "back": c.Back = v; break;
                 case "forward": c.Forward = v; break;
+                case "drag_follow": c.DragFollow = v != "0" && v.ToLowerInvariant() != "false"; break;
             }
         }
         if (c.GestureDistance < 100) c.GestureDistance = 100;
@@ -235,6 +410,10 @@ class Config
         sb.AppendLine("; back = rear thumb button, forward = front thumb button. Same key names as above.");
         sb.AppendLine("back = " + Back);
         sb.AppendLine("forward = " + Forward);
+        sb.AppendLine();
+        sb.AppendLine("; Holding a window with the left mouse button while switching desktops?");
+        sb.AppendLine("; 1 = the window moves to the new desktop with you (default). 0 = it stays behind.");
+        sb.AppendLine("drag_follow = " + (DragFollow ? "1" : "0"));
         File.WriteAllText(path, sb.ToString());
     }
 }
@@ -643,6 +822,44 @@ class MxLite
             Log("Sent: " + combo);
     }
 
+    // ---- drag follow ------------------------------------------------------
+
+    // test hooks: the logic tests swap these to fake the left button and the COM move
+    static Func<bool> LeftButtonProbe = LeftButtonDown;
+    static Func<int, bool> MoveProbe = DragFollow.MoveDraggedWindow;
+
+    // physical left button (VK_LBUTTON); swapped mouse buttons are not handled
+    static bool LeftButtonDown() { return (Native.GetAsyncKeyState(0x01) & 0x8000) != 0; }
+
+    // -1 = exactly Ctrl+Win+Left, +1 = exactly Ctrl+Win+Right (any order or case), 0 = anything else
+    static int DesktopDir(string combo)
+    {
+        if (string.IsNullOrEmpty(combo)) return 0;
+        List<string> toks = new List<string>();
+        foreach (string tok in combo.Split('+'))
+        {
+            string t = tok.Trim().ToLowerInvariant();
+            if (t.Length > 0 && !toks.Contains(t)) toks.Add(t);
+        }
+        toks.Sort(StringComparer.Ordinal);
+        string key = string.Join("+", toks.ToArray());
+        return key == "ctrl+left+win" ? -1 : key == "ctrl+right+win" ? 1 : 0;
+    }
+
+    // Sends a bound combo. If it is a desktop switch, the user holds the left
+    // button (dragging a window), and drag_follow is on, the dragged window is
+    // moved to the target desktop first so it comes along.
+    static void SendDesktopAction(string combo)
+    {
+        int dir = DesktopDir(combo);               // -1 left, +1 right, 0 = not a desktop combo
+        if (dir != 0 && Cfg.DragFollow && LeftButtonProbe())
+        {
+            if (MoveProbe(dir)) { Log("drag follow: moved window " + (dir < 0 ? "left" : "right") + " and switched"); return; }
+            Log("drag follow: could not move the window, plain switch");
+        }
+        SendCombo(combo);
+    }
+
     // ---- main device loop -------------------------------------------------
 
     static void DeviceCycle()
@@ -736,8 +953,8 @@ class MxLite
             }
             // thumb buttons fire on the press edge (instant), nothing on release
             bool sideChanged = back != sideBackDown || fwd != sideFwdDown;
-            if (back && !sideBackDown && c.SideButtons) SendCombo(c.Back);
-            if (fwd && !sideFwdDown && c.SideButtons) SendCombo(c.Forward);
+            if (back && !sideBackDown && c.SideButtons) SendDesktopAction(c.Back);
+            if (fwd && !sideFwdDown && c.SideButtons) SendDesktopAction(c.Forward);
             sideBackDown = back; sideFwdDown = fwd;
 
             if (pressed)
@@ -777,7 +994,7 @@ class MxLite
                             if (ax >= flick && !string.IsNullOrEmpty(h)) action = h;
                             else if (ay >= flick && !string.IsNullOrEmpty(v)) action = v;
                         }
-                        if (!string.IsNullOrEmpty(action)) { decided = action; SendCombo(action); }
+                        if (!string.IsNullOrEmpty(action)) { decided = action; SendDesktopAction(action); }
                     }
                 }
                 Log("release: totalMove=" + gTotalMove + " accX=" + gAccX + " accY=" + gAccY + " dir=" + gDir + " fired=" + gFired + " jumps=" + gJumps + " -> " + decided);
@@ -826,7 +1043,7 @@ class MxLite
                 gFired = true;
                 gJumps++;
                 gAccX = 0; gAccY = 0; gPeak = 0;
-                SendCombo(DirAction(c, gDir));
+                SendDesktopAction(DirAction(c, gDir));
                 return;
             }
             // first jump needs the swipe length; each further jump (repeat on) needs extra_distance more
@@ -836,7 +1053,7 @@ class MxLite
                 gFired = true;
                 gJumps++;
                 gAccX = 0; gAccY = 0; gPeak = 0;
-                SendCombo(DirAction(c, gDir));
+                SendDesktopAction(DirAction(c, gDir));
                 if (!c.Repeat) gGestureDone = true;
             }
         }
@@ -977,7 +1194,7 @@ class SettingsForm : Form
     TrackBar tbDist, tbShift, tbExtra, tbHold;
     Label distValue, extraValue, extraLabel, holdValue, holdLabel;
     RadioButton rbAuto, rbCustom;
-    CheckBox cbRepeat, cbStartup, cbSide;
+    CheckBox cbRepeat, cbStartup, cbSide, cbDrag;
     Label savedLabel;
     System.Windows.Forms.Timer statusTimer, applyTimer, savedTimer;
     bool loading = true;
@@ -992,7 +1209,7 @@ class SettingsForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         BackColor = Color.White;
         Font = new Font("Segoe UI", 9.75f);
-        ClientSize = new Size(500, 1028);
+        ClientSize = new Size(500, 1088);
 
         int L = 24, W = 452;
         int y = 16;
@@ -1090,6 +1307,13 @@ class SettingsForm : Form
         y = AddRow(5, "Back (rear)", L, y);
         y = AddRow(6, "Forward (front)", L, y);
         y += 6;
+
+        y = Section("DRAG A WINDOW ALONG", L, W, y);
+        cbDrag = new CheckBox();
+        cbDrag.Text = "Holding a window with the left button while switching? It moves with you";
+        cbDrag.SetBounds(L, y, W, 24); Controls.Add(cbDrag);
+        cbDrag.CheckedChanged += delegate { ScheduleApply(); };
+        y += 34;
 
         y = Section("SCROLL WHEEL FREE-SPIN", L, W, y);
         rbAuto = new RadioButton(); rbAuto.Text = "Use the mouse's own setting (recommended)";
@@ -1286,6 +1510,7 @@ class SettingsForm : Form
         holdValue.Text = tbHold.Value + " ms";
         cbSide.Checked = c.SideButtons;
         SetCombo(5, c.Back); SetCombo(6, c.Forward);
+        cbDrag.Checked = c.DragFollow;
         UpdateEnabled();
         int t;
         bool auto = c.SmartShift == "auto" || !int.TryParse(c.SmartShift, out t);
@@ -1320,6 +1545,7 @@ class SettingsForm : Form
         c.MultiHoldMs = tbHold.Value;
         c.SideButtons = cbSide.Checked;
         c.Back = GetCombo(5); c.Forward = GetCombo(6);
+        c.DragFollow = cbDrag.Checked;
         c.SmartShift = rbAuto.Checked ? "auto" : tbShift.Value.ToString();
         try { c.Save(MxLite.IniPath); }
         catch (Exception ex) { savedLabel.ForeColor = Color.Firebrick; savedLabel.Text = "save failed: " + ex.Message; return; }

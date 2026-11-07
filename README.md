@@ -1,6 +1,6 @@
 # MxLite
 
-A tiny replacement for Logitech Options+ on Windows. One ~40 KB program, no installer, about 30 MB of memory.
+A tiny replacement for Logitech Options+ on Windows. One ~50 KB program, no installer, about 30 MB of memory.
 
 Not made by or affiliated with Logitech.
 
